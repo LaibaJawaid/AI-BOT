@@ -1,7 +1,6 @@
 discord.py
 python-dotenv
 numpy
+os
 joblib
-sentence-transformers
 requests
-transformers
