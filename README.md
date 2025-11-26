@@ -75,7 +75,6 @@ Just **copy–paste** this directly into your GitHub README.
   <img src="https://img.shields.io/badge/Ollama-000000?style=for-the-badge&logo=ollama&logoColor=white" />
   <img src="https://img.shields.io/badge/BGE--M3-6C63FF?style=for-the-badge&logo=ai&logoColor=white" />
   <img src="https://img.shields.io/badge/LLaMA_3.2-7D4698?style=for-the-badge&logo=meta&logoColor=white" />
-  <img src="https://img.shields.io/badge/Phi_3_Mini-00A67E?style=for-the-badge&logo=openai&logoColor=white" />
 
   <!-- Python Libraries -->
 
