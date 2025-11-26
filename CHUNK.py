@@ -1,176 +1,379 @@
+"""
+STEP 1: SEMANTIC CHUNKING FOR PROPHET'S WIVES DATA
+Creates intelligent chunks that preserve context and meaning
+"""
+
 import json
 import re
+from typing import List, Dict
 
-# --- File Paths and Parameters ---
-INPUT_CHAPTER_WISE_FILE = "chpWise.json"
-OUTPUT_FINAL_CHUNKS_FILE = "final_Chunks.json"
-MAX_CHUNK_SIZE = 1500  # Characters (approx 200-300 words)
-CHUNK_OVERLAP = 150    # Characters
+# ============================================
+# SEMANTIC CHUNKER CLASS
+# ============================================
 
-# --- Splitter Delimiters (Order matters) ---
-split_delimiters = ["\n\n", "\n", ". ", " ", ""]
-
-def get_chapter_name(text):
-    """
-    Chapter ke shuru se wife ka naam nikalta hai, 'Umm' jaise prefixes aur 
-    Zaynab jaisi duplicate entries ko theek karta hai.
-    Yeh function ab specific keywords (unique identifiers) search karta hai.
-    """
-    text_lower = text.lower()
-    # Sirf shuruaati 200 characters ko check karein jahan title hota hai
-    start_of_chapter = text_lower[:200] 
-
-    # 1. Zaynab Disambiguation (Highest Priority)
-    if 'zaynab bint khuzaymah' in start_of_chapter:
-        return "Zaynab Khuzaymah"
-    if 'zaynab bint jahsh' in start_of_chapter:
-        return "Zaynab Jahsh"
-        
-    # 2. Umm Habībah (Must be tagged correctly)
-    if 'umm habibah ramlah bint' in start_of_chapter:
-        return "Ummhabibah" 
+class SemanticChunker:
+    """Creates semantically meaningful chunks from wife biographies"""
     
-    # 3. Fallback for all other names using the robust prefix extraction
-    # Pattern: 'umm al-muminin' ke baad, koi bhi name/word/char, uske baad 'bint'
-    match = re.search(r'umm\s+al-muminin\s+([\w\s\*\’\'-]+)\s*bint', start_of_chapter, re.IGNORECASE)
+    def __init__(self, max_chunk_size=800, min_chunk_size=400):
+        """
+        Initialize chunker with size constraints
+        
+        Args:
+            max_chunk_size: Maximum characters per chunk (default: 800)
+            min_chunk_size: Minimum characters per chunk (default: 400)
+        """
+        self.max_chunk_size = max_chunk_size
+        self.min_chunk_size = min_chunk_size
+        
+        print(f"✅ Chunker initialized:")
+        print(f"   - Max chunk size: {max_chunk_size} chars (~{max_chunk_size//6} words)")
+        print(f"   - Min chunk size: {min_chunk_size} chars (~{min_chunk_size//6} words)")
     
-    if match:
-        name_part = match.group(1).strip()
-        # Clean special characters and multiple spaces
-        cleaned_name = re.sub(r'[\*,\.\'\"\(\)\-\’]', '', name_part).strip()
-        words = cleaned_name.split()
-
-        if not words:
-            return "General Conclusion"
-
-        primary_name = words[0].capitalize()
+    def extract_wife_info(self, text: str) -> Dict:
+        """
+        Extract wife name and aliases from text
+        This helps in identifying which wife the chunk belongs to
+        """
+        wife_name = None
+        aliases = []
         
-        # 'Umm' or 'Bint' prefix handling (e.g., Umm Salamah, only gets 'Salamah')
-        if primary_name.lower() in ('umm', 'bint') and len(words) > 1:
-            primary_name = words[1].capitalize()
+        # IMPROVED: Better pattern to capture full name including 3 parts
+        # Pattern: "umm al-muminin NAME bint FATHER_NAME"
+        name_match = re.search(
+            r'umm al-muminin\s+([a-z]+(?:\s+bint\s+[a-z]+(?:\s+[a-z]+)?)?)',
+            text.lower()
+        )
+        if name_match:
+            wife_name = name_match.group(1).title()
         
-        return primary_name
-
-    # Final fallback
-    return "General Conclusion"
-
-def recursive_text_splitter(text, chapter_name, chunk_size, overlap):
-    """
-    Text ko recursively chote chunks mein todta hai, jahan sentence aur
-    paragraph boundaries ko maintain kiya jaata hai.
-    """
+        # IMPROVED: Better alias extraction (only short names, not sentences)
+        alias_patterns = [
+            r'also known as[:\s]+([a-z\s]{3,20})(?:[,\.]|$)',
+            r'nicknamed[:\s]+([a-z\s]{3,20})(?:[,\.]|$)',
+            r'called[:\s]+([a-z\s]{3,20})(?:[,\.]|$)',
+            r'dubbed[:\s]+([a-z\s]{3,20})(?:[,\.]|$)',
+        ]
+        
+        for pattern in alias_patterns:
+            matches = re.findall(pattern, text.lower())
+            for match in matches:
+                # Clean and validate alias
+                alias = match.strip()
+                # Only keep if it's a reasonable name (3-20 chars, mostly letters)
+                if 3 <= len(alias) <= 20 and sum(c.isalpha() for c in alias) > len(alias) * 0.7:
+                    aliases.append(alias.title())
+        
+        return {
+            'wife_name': wife_name,
+            'aliases': list(set(aliases))  # Remove duplicates
+        }
     
-    # 1. Text ko sentences/paragraphs mein todna
-    texts = [text]
-    for delimiter in split_delimiters:
-        new_texts = []
-        for t in texts:
-            if len(t) > chunk_size:
-                new_texts.extend([item.strip() for item in t.split(delimiter) if item.strip()])
-            else:
-                new_texts.append(t)
+    def split_into_sections(self, text: str) -> List[Dict]:
+        """
+        Split text into semantic sections based on topics
+        This preserves context by keeping related information together
+        """
+        sections = []
         
-        texts = new_texts
-        texts = [t.strip() for t in texts if t.strip()]
+        # Define section headers (topics commonly found in biographies)
+        section_markers = [
+            'name and lineage',
+            'her marriage',
+            'her life with',
+            'her emigration',
+            'her death',
+            'her virtues',
+            'embracing islam',
+            'her childhood',
+            'her upbringing',
+            'her knowledge',
+            'wisdom behind',
+            'her contributions',
+            'her generosity',
+            'battle of',
+            'her worship',
+            'her piety',
+            'criteria for',
+            'the wisdom',
+            'her father',
+            'her mother'
+        ]
         
-        if all(len(t) <= chunk_size for t in texts):
-            break
-
-    final_chunks = []
-    current_chunk = ""
-    
-    # 2. Tukdo ko jodkar final chunks banana (Overlap ke saath)
-    for segment in texts:
+        # Split by double newlines (paragraphs)
+        paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
         
-        if len(current_chunk) + len(segment) + 1 > chunk_size:
+        current_section = {
+            'title': 'Introduction',
+            'content': []
+        }
+        
+        for para in paragraphs:
+            # Check if paragraph starts a new section
+            para_lower = para.lower()
+            is_new_section = False
             
-            if current_chunk:
-                final_chunks.append({
-                    "wife_name": chapter_name,
-                    "content": current_chunk.strip()
+            for marker in section_markers:
+                if para_lower.startswith(marker):
+                    # Save previous section if it has content
+                    if current_section['content']:
+                        sections.append(current_section)
+                    
+                    # Start new section
+                    current_section = {
+                        'title': marker.title(),
+                        'content': [para]
+                    }
+                    is_new_section = True
+                    break
+            
+            if not is_new_section:
+                current_section['content'].append(para)
+        
+        # Add last section
+        if current_section['content']:
+            sections.append(current_section)
+        
+        return sections
+    
+    def create_chunks(self, chapter_text: str) -> List[Dict]:
+        """
+        Create semantic chunks with rich metadata
+        
+        Returns:
+            List of chunks with structure:
+            {
+                'wife_name': str,
+                'aliases': list,
+                'section': str,
+                'content': str,
+                'char_count': int
+            }
+        """
+        chunks = []
+        
+        # Step 1: Extract wife information
+        wife_info = self.extract_wife_info(chapter_text)
+        
+        # Step 2: Split into sections
+        sections = self.split_into_sections(chapter_text)
+        
+        # Step 3: Create chunks from sections
+        for section in sections:
+            section_text = ' '.join(section['content'])
+            
+            # If section is small enough, keep as one chunk
+            if len(section_text) <= self.max_chunk_size:
+                chunks.append({
+                    'wife_name': wife_info['wife_name'] or 'Unknown',
+                    'aliases': wife_info['aliases'],
+                    'section': section['title'],
+                    'content': section_text,
+                    'char_count': len(section_text)
                 })
-            
-            overlap_text = current_chunk[-overlap:].strip() if len(current_chunk) > overlap else ""
-            current_chunk = overlap_text + " " + segment
-            
-        else:
-            current_chunk += (" " if current_chunk else "") + segment
-            
-    # Last chunk ko save karo
-    if current_chunk.strip():
-        final_chunks.append({
-            "wife_name": chapter_name,
-            "content": current_chunk.strip()
-        })
+            else:
+                # Split large sections by sentences
+                sentences = re.split(r'(?<=[.!?])\s+', section_text)
+                
+                current_chunk = []
+                current_length = 0
+                
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if not sentence:
+                        continue
+                        
+                    sentence_length = len(sentence)
+                    
+                    # If adding this sentence exceeds max, save current chunk
+                    if current_length + sentence_length > self.max_chunk_size and current_length >= self.min_chunk_size:
+                        chunk_content = ' '.join(current_chunk)
+                        chunks.append({
+                            'wife_name': wife_info['wife_name'] or 'Unknown',
+                            'aliases': wife_info['aliases'],
+                            'section': section['title'],
+                            'content': chunk_content,
+                            'char_count': len(chunk_content)
+                        })
+                        current_chunk = [sentence]
+                        current_length = sentence_length
+                    else:
+                        current_chunk.append(sentence)
+                        current_length += sentence_length + 1  # +1 for space
+                
+                # Add remaining chunk
+                if current_chunk:
+                    chunk_content = ' '.join(current_chunk)
+                    chunks.append({
+                        'wife_name': wife_info['wife_name'] or 'Unknown',
+                        'aliases': wife_info['aliases'],
+                        'section': section['title'],
+                        'content': chunk_content,
+                        'char_count': len(chunk_content)
+                    })
         
-    return final_chunks
+        return chunks
 
-def process_and_chunk_chapters():
+# ============================================
+# PROCESSING FUNCTION
+# ============================================
+
+def process_chapters(input_file: str, output_file: str):
     """
-    Chapter-wise file ko load karta hai, chunks mein todta hai, aur phir
-    unko sirf JSON file mein save karta hai.
+    Process chapter-wise data into semantic chunks
+    
+    Args:
+        input_file: Path to chpWise.json
+        output_file: Path to save semantic_chunks.json
     """
-    print(f"🔄 Loading data from: {INPUT_CHAPTER_WISE_FILE}...")
+    
+    print("\n" + "="*70)
+    print("🌙 SEMANTIC CHUNKING FOR PROPHET'S WIVES DATA")
+    print("="*70)
+    
+    # Load chapter data
+    print(f"\n📚 Loading data from: {input_file}")
     try:
-        with open(INPUT_CHAPTER_WISE_FILE, 'r', encoding='utf-8') as f:
-            chapter_list = json.load(f)
+        with open(input_file, 'r', encoding='utf-8') as f:
+            chapters = json.load(f)
+        print(f"✅ Loaded {len(chapters)} chapters")
     except FileNotFoundError:
-        print(f"❌ ERROR: {INPUT_CHAPTER_WISE_FILE} file nahin mili.")
+        print(f"❌ Error: File '{input_file}' not found!")
         return
     except json.JSONDecodeError:
-        print("❌ ERROR: JSON file format theek nahi hai.")
+        print(f"❌ Error: File '{input_file}' is not valid JSON!")
         return
-
-    all_final_chunks = []
     
-    for i, chapter_text in enumerate(chapter_list):
-        if not chapter_text:
-            continue
+    # Initialize chunker
+    print("\n🔧 Initializing semantic chunker...")
+    chunker = SemanticChunker(max_chunk_size=800, min_chunk_size=400)
+    
+    # Process each chapter
+    print("\n✂️  Creating semantic chunks...")
+    print("-" * 70)
+    
+    all_chunks = []
+    wife_chunk_counts = {}
+    
+    for i, chapter in enumerate(chapters, 1):
+        print(f"\n📖 Processing chapter {i}/{len(chapters)}...")
+        
+        chapter_chunks = chunker.create_chunks(chapter)
+        all_chunks.extend(chapter_chunks)
+        
+        # Track chunks per wife
+        if chapter_chunks:
+            wife_name = chapter_chunks[0]['wife_name']
+            wife_chunk_counts[wife_name] = len(chapter_chunks)
+            print(f"   ✅ Created {len(chapter_chunks)} chunks for {wife_name}")
+    
+    # POST-PROCESSING: Fix "Unknown" and incomplete names
+    print("\n🔧 Post-processing: Fixing incomplete names...")
+    
+    # Manual mapping for known wives (based on table of contents)
+    wife_mappings = {
+        'umm salamah hind': 'Umm Salamah Hind Bint Umayyah',
+        'umm habibah ramlah': 'Umm Habibah Ramlah Bint Abu Sufyan',
+    }
+    
+    fixed_count = 0
+    for chunk in all_chunks:
+        # Fix incomplete "Umm" names by checking content
+        if chunk['wife_name'] == 'Umm' or chunk['wife_name'] == 'Unknown':
+            content_lower = chunk['content'].lower()
             
-        chapter_name = get_chapter_name(chapter_text)
-        
-        # Chapter ko chote chunks mein todein
-        chunks = recursive_text_splitter(chapter_text, chapter_name, MAX_CHUNK_SIZE, CHUNK_OVERLAP)
-        all_final_chunks.extend(chunks)
-
-    # --- Step 1: JSON File Output ---
-    output_filename = "final_Chunks.json" # Use user's observed output filename for consistency
+            # Check for specific patterns in content
+            if 'umm salamah' in content_lower:
+                chunk['wife_name'] = 'Umm Salamah Hind Bint Umayyah'
+                fixed_count += 1
+            elif 'umm habibah' in content_lower:
+                chunk['wife_name'] = 'Umm Habibah Ramlah Bint Abu Sufyan'
+                fixed_count += 1
+            elif 'conclusion' in content_lower:
+                chunk['wife_name'] = 'Conclusion'
+                chunk['section'] = 'Conclusion'
+                fixed_count += 1
     
-    try:
-        with open(output_filename, 'w', encoding='utf-8') as f:
-            json.dump(all_final_chunks, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"❌ JSON file save karne mein galti: {e}")
-
+    print(f"✅ Fixed {fixed_count} chunks with incomplete/unknown names")
     
-    # --- Final Summary ---
-    print("\n--- Final Chunking and Serialization Summary ---")
-    print(f"✅ Total Chapters Processed: {len(chapter_list)}")
-    print(f"✅ Total Final Embeddable Chunks Created: {len(all_final_chunks)}")
-    print(f"💾 Output file saved to: {output_filename}")
-    print("\n--- Validation Check ---")
+    # Recalculate statistics after fixing
+    wife_chunk_counts = {}
+    for chunk in all_chunks:
+        wife_name = chunk['wife_name']
+        wife_chunk_counts[wife_name] = wife_chunk_counts.get(wife_name, 0) + 1
     
-    # Validation checks for the requested changes
-    umm_habibah_chunk = next((chunk for chunk in all_final_chunks if chunk['wife_name'] == 'Ummhabibah'), None)
-    zaynab_khuzaymah_chunk = next((chunk for chunk in all_final_chunks if chunk['wife_name'] == 'Zaynab Khuzaymah'), None)
-    zaynab_jahsh_chunk = next((chunk for chunk in all_final_chunks if chunk['wife_name'] == 'Zaynab Jahsh'), None)
-
-
-    if umm_habibah_chunk:
-        print(f"✅ Umm Habībah chunk found. Tag used: {umm_habibah_chunk['wife_name']}")
+    # Display statistics
+    print("\n" + "="*70)
+    print("📊 CHUNKING STATISTICS")
+    print("="*70)
+    print(f"Total chunks created: {len(all_chunks)}")
+    print(f"\nChunks per wife:")
+    for wife, count in sorted(wife_chunk_counts.items()):
+        print(f"  - {wife}: {count} chunks")
+    
+    # Calculate average chunk size
+    avg_size = sum(c['char_count'] for c in all_chunks) / len(all_chunks)
+    print(f"\nAverage chunk size: {int(avg_size)} characters (~{int(avg_size/6)} words)")
+    
+    # Show size distribution
+    small_chunks = sum(1 for c in all_chunks if c['char_count'] < 500)
+    medium_chunks = sum(1 for c in all_chunks if 500 <= c['char_count'] < 800)
+    large_chunks = sum(1 for c in all_chunks if c['char_count'] >= 800)
+    
+    print(f"\nSize distribution:")
+    print(f"  - Small (<500 chars): {small_chunks}")
+    print(f"  - Medium (500-800 chars): {medium_chunks}")
+    print(f"  - Large (≥800 chars): {large_chunks}")
+    
+    # Quality checks
+    print(f"\n🔍 Quality checks:")
+    unknown_chunks = sum(1 for c in all_chunks if c['wife_name'] == 'Unknown')
+    if unknown_chunks > 0:
+        print(f"  ⚠️  Warning: {unknown_chunks} chunks still have 'Unknown' wife name")
     else:
-        print("❌ Umm Habībah chunk not found or incorrectly tagged.")
-        
-    if zaynab_khuzaymah_chunk:
-        print(f"✅ Zaynab Khuzaymah chunk found. Tag used: {zaynab_khuzaymah_chunk['wife_name']}")
-    else:
-        print("❌ Zaynab Khuzaymah chunk not found or incorrectly tagged.")
+        print(f"  ✅ All chunks have identified wife names")
     
-    if zaynab_jahsh_chunk:
-        print(f"✅ Zaynab Jahsh chunk found. Tag used: {zaynab_jahsh_chunk['wife_name']}")
-    else:
-        print("❌ Zaynab Jahsh chunk not found or incorrectly tagged.")
+    # Save chunks
+    print(f"\n💾 Saving chunks to: {output_file}")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(all_chunks, f, ensure_ascii=False, indent=2)
+    
+    print("✅ Chunks saved successfully!")
+    
+    # Show sample chunk
+    print("\n" + "="*70)
+    print("📝 SAMPLE CHUNK (First chunk)")
+    print("="*70)
+    if all_chunks:
+        sample = all_chunks[0]
+        print(f"Wife: {sample['wife_name']}")
+        print(f"Section: {sample['section']}")
+        print(f"Aliases: {sample['aliases']}")
+        print(f"Character count: {sample['char_count']}")
+        print(f"\nContent preview (first 300 chars):")
+        print("-" * 70)
+        print(sample['content'][:300] + "...")
+    
+    print("\n" + "="*70)
+    print("✨ CHUNKING COMPLETE!")
+    print("="*70)
+    print(f"\n📁 Output file: {output_file}")
+    print("📊 Next steps:")
+    print("  1. Review the chunks in 'semantic_chunks.json'")
+    print("  2. Check if wife names are correctly identified")
+    print("  3. Verify sections are properly separated")
+    print("  4. Ready for embedding generation!")
+    
+    return all_chunks
 
+# ============================================
+# MAIN EXECUTION
+# ============================================
 
-# --- Execution ---
-process_and_chunk_chapters()
+if __name__ == "__main__":
+    # Run chunking process
+    chunks = process_chapters(
+        input_file='chpWise.json',
+        output_file='semantic_chunks.json'
+    )
+    
+    print("\n🎉 Done! Check 'semantic_chunks.json' to see the results.")
