@@ -1,117 +1,63 @@
-# bot.py
-import asyncio
-import time
-import logging
+# bot.py (Updated with Message Splitting Logic)
+
 import discord
 from discord.ext import commands
+import asyncio 
+
 from config import DISCORD_TOKEN
-from retrieval import generate_answer
+from retrieval import perform_rag_retrieval
 
-# ----- Logging -----
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("GuideBot")
-
-# ----- Intents -----
+# --- Discord Bot Setup ---
 intents = discord.Intents.default()
-intents.message_content = True  # must be enabled in Dev Portal too
-
-# ----- Bot -----
-bot = commands.Bot(command_prefix=None, intents=intents)  # no prefix; responds to raw messages or mentions
-
-# Simple per-user rate limit (seconds between queries)
-USER_COOLDOWN = 2.0
-_last_seen = {}  # user_id -> timestamp
-
+intents.message_content = True 
+bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.event
 async def on_ready():
-    log.info(f"Bot logged in as {bot.user} (id={bot.user.id})")
+    """Prints a message when the bot successfully connects to Discord."""
+    print(f'Bot connected as {bot.user} (ID: {bot.user.id})')
 
-
-def is_trigger_message(message: discord.Message) -> bool:
-    """
-    Decide whether to respond:
-    - If bot is mentioned explicitly OR
-    - If message is a direct DM OR
-    - If message is plain text not beginning with common command prefixes
-    """
-    if message.author.bot:
-        return False
-
-    # DM always reply
-    if isinstance(message.channel, discord.DMChannel):
-        return True
-
-    # Mention triggers
-    if bot.user.mentioned_in(message):
-        return True
-
-    # Simple chat: respond to plain statements (not starting with / or ! or .)
-    txt = message.content.strip()
-    if not txt:
-        return False
-    if txt.startswith(("/", "!", ".")):
-        return False
-
-    # optionally: restrict to certain channel ids by adding checks here
-
-    return True
-
-
-@bot.event
-async def on_message(message: discord.Message):
-    if not is_trigger_message(message):
-        # still allow commands to process
-        await bot.process_commands(message)
-        return
-
-    # Simple cooldown per user
-    now = time.time()
-    last = _last_seen.get(message.author.id, 0)
-    if now - last < USER_COOLDOWN:
-        # politely ignore or optionally send a small notice
+@bot.command(name='azwaj')
+async def azwaj_query(ctx, *, users_query: str):
+    """Handles the RAG query for Ummul Momineen (Azwaj)."""
+    
+    async with ctx.typing():
         try:
-            await message.add_reaction("⏳")
-        except Exception:
-            pass
-        return
-    _last_seen[message.author.id] = now
+            # Run RAG process in executor
+            final_response = await bot.loop.run_in_executor(
+                None, 
+                perform_rag_retrieval, 
+                users_query
+            )
+        except Exception as e:
+            print(f"An unexpected error occurred during RAG process: {e}")
+            final_response = "An internal error occurred while trying to process your request."
+        
+        # === START OF NEW LOGIC TO HANDLE 2000 CHARACTER LIMIT ===
+        MAX_CHARS = 2000
+        response_text = final_response
 
-    # Normalize query (remove mention text)
-    content = message.content.replace(f"<@!{bot.user.id}>", "").replace(f"<@{bot.user.id}>", "").strip()
-
-    # Show typing indicator while processing
-    try:
-        async with message.channel.typing():
-            # Use asyncio.wait_for to cap the whole retrieval+generation time
-            try:
-                answer = await asyncio.wait_for(generate_answer(content), timeout=60.0)
-            except asyncio.TimeoutError:
-                answer = "Sorry — the model is taking too long. Try again in a bit."
-            except Exception as e:
-                log.exception("generate_answer failed")
-                answer = f"Error while generating answer: {e}"
-
-    except Exception as e:
-        # If typing context fails, fallback to direct call (still async)
-        log.exception("Typing context failed")
-        try:
-            answer = await generate_answer(content)
-        except Exception as e2:
-            answer = f"Error while generating answer: {e2}"
-
-    # Respond (as reply to keep thread)
-    try:
-        # short-circuit empty answer
-        if not answer:
-            answer = "I couldn't find an answer in the dataset."
-        await message.reply(answer, mention_author=False)
-    except Exception:
-        log.exception("Failed to send message response")
-
-    # allow commands processing too
-    await bot.process_commands(message)
-
+        if len(response_text) > MAX_CHARS:
+            # Split the long response into chunks of max 2000 characters
+            # We use a simple method here, but for perfect paragraph/line breaks, 
+            # more complex logic (like discord.utils.fill_in_chunks) is needed.
+            chunks = [response_text[i:i + MAX_CHARS] for i in range(0, len(response_text), MAX_CHARS)]
+            
+            # Send each chunk separately
+            for i, chunk in enumerate(chunks):
+                if i == 0:
+                    # Add a header to the first chunk
+                    await ctx.send(f"**[Detailed Response - Part 1/{len(chunks)}]**\n{chunk}")
+                else:
+                    await ctx.send(f"**[Part {i+1}/{len(chunks)}]**\n{chunk}")
+        else:
+            # Send the response normally
+            await ctx.send(response_text)
+        # === END OF NEW LOGIC ===
 
 if __name__ == "__main__":
-    bot.run(DISCORD_TOKEN)
+    if DISCORD_TOKEN:
+        print("Starting bot...")
+        bot.run(DISCORD_TOKEN)
+    else:
+        print("Error: DISCORD_TOKEN not found in .env file. Please check config.py and .env.")
