@@ -46,7 +46,7 @@ Built with **Python, Ollama, discord.py, BGE-M3 embeddings and LLAMA 3.2 for use
 
 | Component                | Technology        | Purpose                        |
 | ------------------------ | ----------------- | ------------------------------ |
-| **Python**               | 3.10+             | Main backend logic             |
+| **Python**               | 3.13+             | Main backend logic             |
 | **discord.py**           | Bot framework     | Discord command handling       |
 | **Ollama**               | Local LLM runtime | Embedding & generation         |
 | **BGE-M3**               | Embedding model   | High-accuracy semantic vectors |
