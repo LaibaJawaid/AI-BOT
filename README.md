@@ -1,4 +1,4 @@
-m                                                                          aaaaaaaaaaaaaasiiiiiiiiiiiiiiiiiiiiidddddddddddddddddddddddddddddddddddddddddddddx# 🌺 RAG-Based — Prophet's Wives Great Lives — Guidance Bot
+# 🌺 RAG-Based — Great Lives of Ummahat-ul-Mu'minin — Guidance Bot
 
 A highly accurate **Retrieval-Augmented Islamic Guidance Bot** that answers questions about the **Mothers of the Believers (Azwāj al-Mu’minīn)** using a custom knowledge base, semantic search, and local LLM generation.
 Built with **Python, Ollama, discord.py, and BGE-M3 embeddings**.
